@@ -1,0 +1,17 @@
+# definitive config file if present
+goviflux.json
+__debug__bin.json
+
+# token cache if present
+goviflux.token
+__debug__bin.token
+
+# binary file if generated
+goviflux
+goviflux.exe
+
+#ignore file locks
+*.lock
+
+#ignore generated version
+version.go
