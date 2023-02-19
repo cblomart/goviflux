@@ -1,9 +1,9 @@
 package vicare
 
-func TokenDecrypt(string) string {
-	return string
+func TokenDecrypt(encryptedToken string) string {
+	return encryptedToken
 }
 
-func TokenEncrypt(string) string {
-	return string
+func TokenEncrypt(token string) string {
+	return token
 }
