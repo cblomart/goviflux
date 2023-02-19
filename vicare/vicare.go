@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/billgraziano/dpapi"
 	"github.com/cblomart/goviflux/config"
 	"github.com/grokify/go-pkce"
 )
@@ -136,12 +135,7 @@ func (v *ViCare) GetRefreshToken() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if runtime.GOOS != "windows" {
-		return string(token), nil
-	} else {
-		// use DPAPI to encrypt token
-		return dpapi.Decrypt(string(token))
-	}
+	return TokenDecrypt(string(token)), nil
 }
 
 func (v *ViCare) HasRefreshToken() bool {
@@ -165,17 +159,8 @@ func (v *ViCare) SaveRefreshToken(token string) error {
 	if len(token) == 0 {
 		return fmt.Errorf("Cannot save empty refresh token")
 	}
-	if runtime.GOOS != "windows" {
-		err := ioutil.WriteFile(v.refreshTokenPath, []byte(token), os.FileMode(int(0600)))
-		if err != nil {
-			return err
-		}
-	}
-	encToken, err := dpapi.Encrypt(token)
-	if err != nil {
-		return err
-	}
-	err = ioutil.WriteFile(v.refreshTokenPath, []byte(encToken), os.FileMode(int(0666)))
+	encToken := TokenEncrypt(token)
+	err := ioutil.WriteFile(v.refreshTokenPath, []byte(encToken), os.FileMode(int(0666)))
 	if err != nil {
 		return err
 	}
