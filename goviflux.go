@@ -26,9 +26,89 @@ const (
 )
 
 var (
-	conf         = &config.Config{}
+	conf         *config.Config
+	vicareclient *vicare.ViCare
+	influx       client.Client
+	points       = []*client.Point{}
 	dependencies = []string{}
 )
+
+// function to collect data
+func collect() {
+	log.Println("retrieving data from viessmann")
+	t := time.Now()
+	for _, device := range conf.Collect {
+		features, err := vicareclient.GetFeaturesFiltered(device.InstallationId, device.GatewaySerial, device.DeviceId, device.Features)
+		if err != nil {
+			log.Printf("could not collect features for device: installation id=%d; gateway serial=%s; device id=%s: %s\n", device.InstallationId, device.GatewaySerial, device.DeviceId, err)
+		}
+		for _, feature := range features {
+			if feature.Properties.Value != nil {
+				point, err := client.NewPoint(
+					feature.Feature,
+					map[string]string{
+						"installationId": strconv.Itoa(device.InstallationId),
+						"gatewaySerial":  device.GatewaySerial,
+						"deviceId":       device.DeviceId,
+						"unit":           feature.Properties.Value.Unit,
+						"type":           feature.Properties.Value.Type,
+					},
+					map[string]interface{}{
+						"value": feature.Properties.Value.Value,
+					},
+					t,
+				)
+				if err != nil {
+					log.Printf("could not create point from %s", feature.Feature)
+				}
+				points = append(points, point)
+			}
+			if feature.Properties.CurrentDay != nil {
+				point, err := client.NewPoint(
+					feature.Feature,
+					map[string]string{
+						"installationId": strconv.Itoa(device.InstallationId),
+						"gatewaySerial":  device.GatewaySerial,
+						"deviceId":       device.DeviceId,
+						"unit":           feature.Properties.CurrentDay.Unit,
+						"type":           feature.Properties.CurrentDay.Type,
+					},
+					map[string]interface{}{
+						"currentDay":    feature.Properties.CurrentDay.Value,
+						"currentMonth":  feature.Properties.CurrentMonth.Value,
+						"currentYear":   feature.Properties.CurrentYear.Value,
+						"lastSevenDays": feature.Properties.LastSevenDays.Value,
+					},
+					t,
+				)
+				if err != nil {
+					log.Printf("could not create point from %s", feature.Feature)
+				}
+				points = append(points, point)
+
+			}
+		}
+		bps, err := client.NewBatchPoints(client.BatchPointsConfig{
+			Precision:       "s",
+			Database:        conf.Influx.Database,
+			RetentionPolicy: "default",
+		})
+		bps.AddPoints(points)
+		if err != nil {
+			log.Println("cloud not create batchpoints")
+			points = nil
+			continue
+		}
+		err = influx.Write(bps)
+		if err != nil {
+			log.Printf("cloud not wirte to influx: %s", err)
+			points = nil
+			continue
+		}
+		log.Printf("written %d points to influx", len(points))
+		points = nil
+	}
+}
 
 // Service has embedded daemon
 type Service struct {
@@ -104,13 +184,14 @@ func (service *Service) Manage() (string, error) {
 	signal.Notify(interrupt, os.Interrupt, os.Kill, syscall.SIGTERM)
 
 	// create the vicare client
-	vicareclient, err := vicare.ConfigToViCare(conf)
+	var err error
+	vicareclient, err = vicare.ConfigToViCare(conf)
 	if err != nil {
 		return fmt.Sprintf("could not instanciate vicare client"), err
 	}
 
 	// preparing the influx connection
-	influx, err := client.NewHTTPClient(client.HTTPConfig{
+	influx, err = client.NewHTTPClient(client.HTTPConfig{
 		Addr:     conf.Influx.Url,
 		Username: conf.Username,
 		Password: conf.Password,
@@ -123,85 +204,15 @@ func (service *Service) Manage() (string, error) {
 		return fmt.Sprintf("test connection to influx failed"), err
 	}
 	log.Printf("connected to influx %s (%s)", conf.Influx.Url, ver)
-	points := []*client.Point{}
 	defer influx.Close()
+
+	//initial collection
+	collect()
 
 	for {
 		select {
 		case <-ticker.C:
-			log.Println("retrieving data from viessmann")
-			t := time.Now()
-			for _, device := range conf.Collect {
-				features, err := vicareclient.GetFeaturesFiltered(device.InstallationId, device.GatewaySerial, device.DeviceId, device.Features)
-				if err != nil {
-					log.Printf("could not collect features for device: installation id=%d; gateway serial=%s; device id=%s: %s\n", device.InstallationId, device.GatewaySerial, device.DeviceId, err)
-				}
-				for _, feature := range features {
-					if feature.Properties.Value != nil {
-						point, err := client.NewPoint(
-							feature.Feature,
-							map[string]string{
-								"installationId": strconv.Itoa(device.InstallationId),
-								"gatewaySerial":  device.GatewaySerial,
-								"deviceId":       device.DeviceId,
-								"unit":           feature.Properties.Value.Unit,
-								"type":           feature.Properties.Value.Type,
-							},
-							map[string]interface{}{
-								"value": feature.Properties.Value.Value,
-							},
-							t,
-						)
-						if err != nil {
-							log.Printf("could not create point from %s", feature.Feature)
-						}
-						points = append(points, point)
-					}
-					if feature.Properties.CurrentDay != nil {
-						point, err := client.NewPoint(
-							feature.Feature,
-							map[string]string{
-								"installationId": strconv.Itoa(device.InstallationId),
-								"gatewaySerial":  device.GatewaySerial,
-								"deviceId":       device.DeviceId,
-								"unit":           feature.Properties.CurrentDay.Unit,
-								"type":           feature.Properties.CurrentDay.Type,
-							},
-							map[string]interface{}{
-								"currentDay":    feature.Properties.CurrentDay.Value,
-								"currentMonth":  feature.Properties.CurrentMonth.Value,
-								"currentYear":   feature.Properties.CurrentYear.Value,
-								"lastSevenDays": feature.Properties.LastSevenDays.Value,
-							},
-							t,
-						)
-						if err != nil {
-							log.Printf("could not create point from %s", feature.Feature)
-						}
-						points = append(points, point)
-
-					}
-				}
-				bps, err := client.NewBatchPoints(client.BatchPointsConfig{
-					Precision:       "s",
-					Database:        conf.Influx.Database,
-					RetentionPolicy: "default",
-				})
-				bps.AddPoints(points)
-				if err != nil {
-					log.Println("cloud not create batchpoints")
-					points = nil
-					continue
-				}
-				err = influx.Write(bps)
-				if err != nil {
-					log.Printf("cloud not wirte to influx: %s", err)
-					points = nil
-					continue
-				}
-				log.Printf("written %d points to influx", len(points))
-				points = nil
-			}
+			collect()
 		case killSignal := <-interrupt:
 			log.Println("Got signal:", killSignal)
 			if killSignal == os.Interrupt {
