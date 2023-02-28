@@ -26,7 +26,7 @@ const (
 )
 
 var (
-	conf         *config.Config
+	conf         = &config.Config{}
 	vicareclient *vicare.ViCare
 	influx       client.Client
 	points       = []*client.Point{}
