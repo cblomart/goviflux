@@ -101,7 +101,7 @@ func collect() {
 		}
 		err = influx.Write(bps)
 		if err != nil {
-			log.Printf("cloud not wirte to influx: %s", err)
+			log.Printf("cloud not write to influx: %s", err)
 			points = nil
 			continue
 		}
@@ -193,8 +193,8 @@ func (service *Service) Manage() (string, error) {
 	// preparing the influx connection
 	influx, err = client.NewHTTPClient(client.HTTPConfig{
 		Addr:     conf.Influx.Url,
-		Username: conf.Username,
-		Password: conf.Password,
+		Username: conf.Influx.Username,
+		Password: conf.Influx.Password,
 	})
 	if err != nil {
 		return fmt.Sprintf("could not instanciate the influx client"), err
