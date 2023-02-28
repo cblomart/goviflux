@@ -89,9 +89,8 @@ func collect() {
 			}
 		}
 		bps, err := client.NewBatchPoints(client.BatchPointsConfig{
-			Precision:       "s",
-			Database:        conf.Influx.Database,
-			RetentionPolicy: "default",
+			Precision: "s",
+			Database:  conf.Influx.Database,
 		})
 		bps.AddPoints(points)
 		if err != nil {
